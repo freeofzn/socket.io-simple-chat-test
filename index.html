@@ -185,10 +185,11 @@
       // room list click
       ulRoomList.addEventListener("click", (e) => {
         e.preventDefault();
-        if (!e.target.matches("#ul-room-list > li > a")) return;
-        e.preventDefault();
+        let targetTag;
+        if (e.target.matches("#ul-room-list > li > a > span")) targetTag = e.target.parentNode;
+        if (e.target.matches("#ul-room-list > li > a")) targetTag = e.target;
 
-        const path = e.target.getAttribute("href");
+        const path = targetTag.getAttribute("href");
 
         if (myInfo.roomId === path) {
           alert("already in the current room");
@@ -196,7 +197,7 @@
         }
 
         ulChatMsg.innerHTML = "";
-        let roomName = e.target.querySelector("#span-room-name").innerHTML;
+        let roomName = targetTag.querySelector("#span-room-name").innerHTML;
         socket.emit("join room", { roomId: path, roomName });
         myInfo.roomId = path;
         myInfo.roomName = roomName;
