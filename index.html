@@ -22,12 +22,19 @@
       .room-wrapper {
         flex-basis: 40%;
         border: 1px solid lavender;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
       }
       .chat-wrapper {
         flex-basis: 50%;
         border: 1px solid lavender;
         overflow: auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
       }
+
       .user-wrapper {
         flex-basis: 10%;
         border: 1px solid lavender;
@@ -58,18 +65,16 @@
   <body>
     <div class="login_container">
       <div id="div-join-wrapper">
-        <div>닉네임</div>
-        <div><input id="input-join" style="width: 100px" maxlength="8" autocomplete="off" placeholder="닉네임" /><button id="btn-join">Join</button></div>
+        <div>N</div>
+        <div><input id="input-join" style="width: 100px" maxlength="8" autocomplete="off" placeholder="N" /><button id="btn-join">Join</button></div>
         <div id="user-status"></div>
       </div>
       <div id="div-login-info-wrapper"></div>
     </div>
     <div class="main-container">
       <div class="room-wrapper">
-        <ul id="ul-room-list">
-          <li><a href="room1">방1</a></li>
-          <li><a href="room2">방2</a></li>
-        </ul>
+        <ul id="ul-room-list"></ul>
+        <div><input id="input-roomname" style="width: 100px" maxlength="20" autocomplete="off" placeholder="room name" /><button id="btn-roomname">make room</button></div>
       </div>
       <div class="chat-wrapper">
         <div class="chat-msg-area">
@@ -88,7 +93,7 @@
     <div id="div-bottom-status-bar"></div>
     <script>
       let socket = io("/nsp1"); // 접속하고자 하는 namespace
-      let myInfo = { isLogin: false, nickName: "", roomName: "" };
+      let myInfo = { isLogin: false, nickName: "", roomId: "", roomName: "" };
       let tempLoginId;
 
       const inputJoin = document.querySelector("#input-join");
@@ -97,11 +102,17 @@
       const divLoginInfoWrapper = document.querySelector("#div-login-info-wrapper");
 
       const ulRoomList = document.querySelector("#ul-room-list");
+      const inputRoomName = document.querySelector("#input-roomname");
+      const btnRoomName = document.querySelector("#btn-roomname");
+
       const inputChatMsg = document.querySelector("#input-chat-msg");
       const btnSendChatMsg = document.querySelector("#btn-send-chat-msg");
       const ulChatMsg = document.querySelector("#ul-chat-msg");
 
-      // 닉네임 엔터
+      /************************************************************************
+       * client event
+       ***********************************************************************/
+      // nickname enter
       inputJoin.addEventListener("keyup", function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -109,7 +120,7 @@
         }
       });
 
-      // 로그인 클릭
+      // login click
       btnJoin.addEventListener("click", function (e) {
         if (inputJoin.value.trim() === "" || inputJoin.value == null) {
           alert("please enter name");
@@ -123,8 +134,8 @@
           return;
         }
 
-        if (!checkKor(inputJoin.value) && !checkEng(inputJoin.value) && !checkNum(inputJoin.value)) {
-          alert("한글/영문/숫자만 사용가능합니다.");
+        if (checkSpecial(inputJoin.value)) {
+          alert("특수문자는 사용할 수 없습니다.");
           inputJoin.focus();
           return;
         }
@@ -136,27 +147,62 @@
         }
 
         tempLoginId = inputJoin.value;
-        socket.emit("join user", tempLoginId);
+        socket.emit("login", tempLoginId);
       });
 
+      // make room click
+      btnRoomName.addEventListener("click", function (e) {
+        if (!myInfo.isLogin) {
+          alert("please input nickname");
+          inputRoomName.focus();
+          return;
+        }
+
+        if (inputRoomName.value.trim() === "" || inputRoomName.value == null) {
+          alert("please enter room name");
+          inputRoomName.focus();
+          return;
+        }
+
+        if (checkSpecial(inputRoomName.value)) {
+          alert("특수문자는 사용할 수 없습니다.");
+          inputRoomName.focus();
+          return;
+        }
+
+        if (getByteLengthOfUtf8String(inputRoomName.value) > 30) {
+          alert("한글10자까지 가능합니다.");
+          inputRoomName.focus();
+          return;
+        }
+
+        let roomId = randomString();
+        socket.emit("join room", { roomId, roomName: inputRoomName.value });
+        myInfo.roomId = roomId;
+        myInfo.roomName = roomId;
+      });
+
+      // room list click
       ulRoomList.addEventListener("click", (e) => {
         e.preventDefault();
         if (!e.target.matches("#ul-room-list > li > a")) return;
         e.preventDefault();
-        const path = e.target.getAttribute("href");
-        console.log(path);
 
-        if (myInfo.roomName === path) {
-          alert("현재방 입니다.");
+        const path = e.target.getAttribute("href");
+
+        if (myInfo.roomId === path) {
+          alert("already in the current room");
           return;
         }
-        ulChatMsg.innerHTML = "";
-        socket.emit("join room", { roomName: path });
-        myInfo.roomName = path;
 
-        setSelectedSideMenu(path);
+        ulChatMsg.innerHTML = "";
+        let roomName = e.target.querySelector("#span-room-name").innerHTML;
+        socket.emit("join room", { roomId: path, roomName });
+        myInfo.roomId = path;
+        myInfo.roomName = roomName;
       });
 
+      // msg send enter
       inputChatMsg.addEventListener("keyup", function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -164,45 +210,41 @@
         }
       });
 
+      // msg send click
       btnSendChatMsg.addEventListener("click", function () {
-        console.log(myInfo);
         if (!myInfo.isLogin) {
-          alert("닉네임이 필요합니다.");
+          alert("please input nickname");
           inputJoin.focus();
           return;
         }
 
         let chatMsg = inputChatMsg.value;
-        socket.emit("chat message", { roomName: myInfo.roomName, chatMsg: chatMsg });
+        socket.emit("chat message", { roomId: myInfo.roomId, roomName: myInfo.roomName, chatMsg: chatMsg });
         inputChatMsg.value = "";
       });
 
-      // 비로그인 접속
-      socket.on("connect user", function (serverMsg) {
-        inputJoin.focus();
-        renderUserCount(serverMsg.loginUserList);
-      });
-
-      // 로그인
-      socket.on("join user", function (serverMsg) {
-        console.log("join user", serverMsg);
-        /*----- 닉네임 중복체크 -----*/
+      /************************************************************************
+       * server event
+       ***********************************************************************/
+      // on login
+      socket.on("login", function (serverMsg) {
         if (tempLoginId === serverMsg.nickName) {
           if (serverMsg.isLogin) {
-            // 정상
+            // ok
             divJoinWrapper.setAttribute("style", "display:none;");
             divLoginInfoWrapper.innerHTML = `<div style="margin-left:auto;">${serverMsg.nickName}</div>`;
             myInfo.isLogin = serverMsg.isLogin;
             myInfo.nickName = serverMsg.nickName;
+            myInfo.roomId = serverMsg.roomId;
             myInfo.roomName = serverMsg.roomName;
             tempLoginId = null;
 
-            // 비로그인 방관전중, 로그인시 -> 입장처리
+            // not login user -> re join room
             if (myInfo.roomName !== "waitRoom#") {
-              socket.emit("join room", { roomName: myInfo.roomName }); // 현재방에 재입장처리(입장메시지 + 유저목록에 추가되게)
+              socket.emit("join room", { roomId: myInfo.roomId, roomName: myInfo.roomName }); // 현재방 재입장처리(입장메시지 + 유저목록 추가)
             }
           } else {
-            // 중복
+            // dup
             divJoinWrapper.setAttribute("style", "display:block;");
             divLoginInfoWrapper.innerHTML = "";
             alert(tempLoginId + "(은/는) 이미 사용중인 이름 입니다. 다른 이름으로 로그인해 주세요.");
@@ -210,9 +252,9 @@
             return;
           }
         }
-        renderUserCount(serverMsg.loginUserList);
       });
 
+      // on chat - join room, leave room, chat msg
       socket.on("chat message", function (serverMsg) {
         if (serverMsg.type === "join room" || serverMsg.type === "leave room") {
           // join, leave
@@ -225,10 +267,19 @@
           item.textContent = `${serverMsg.nickName} > ${serverMsg.msg}`;
           ulChatMsg.appendChild(item);
         }
+        document.querySelector(".chat-wrapper").scrollTop = document.querySelector(".chat-wrapper").scrollHeight;
+      });
+
+      // on all user list
+      // 1. render left room list
+      // 2. render bottom user count
+      socket.on("all user list", function (serverMsg) {
+        renderRoomList(serverMsg.allUserList);
+        renderAllUserCount(serverMsg.allUserList);
       });
 
       /************************************************************************
-       * function list
+       * function
        ***********************************************************************/
       // UTF8 자릿수 계산
       function getByteLengthOfUtf8String(s) {
@@ -240,29 +291,10 @@
           return 0;
         }
       }
-      // 영문(영어) 체크
-      function checkEng(str) {
-        const regExp = /[a-zA-Z]/g; // 영어
-        if (regExp.test(str)) {
-          return true;
-        } else {
-          return false;
-        }
-      }
 
-      // 한글 체크
-      function checkKor(str) {
-        const regExp = /[ㄱ-ㅎㅏ-ㅣ가-힣]/g;
-        if (regExp.test(str)) {
-          return true;
-        } else {
-          return false;
-        }
-      }
-
-      // 숫자 체크
-      function checkNum(str) {
-        const regExp = /[0-9]/g;
+      // 특수문자 체크
+      function checkSpecial(str) {
+        regExp = /[\{\}\[\]\/?.,;:|\)*~`!^\-_+<>@\#$%&\\\=\(\'\"]/g;
         if (regExp.test(str)) {
           return true;
         } else {
@@ -279,11 +311,35 @@
         }
       }
 
-      // 전체 유저수
-      function renderUserCount(userList) {
+      // all 유저수
+      function renderAllUserCount(userList) {
         let allUserCount = userList.length;
         let guestCount = userList.filter((v) => v.nickName === "guest#").length;
         document.querySelector("#div-bottom-status-bar").innerHTML = `All:${allUserCount}(Login:${allUserCount - guestCount} NotLogin:${guestCount})`;
+      }
+
+      // room 목록
+      function renderRoomList(loginUserList) {
+        // room users count
+        const roomUserCounts = {};
+        for (const v of loginUserList) {
+          roomUserCounts[v.roomId] = roomUserCounts[v.roomId] ? roomUserCounts[v.roomId] + 1 : 1;
+        }
+
+        // render
+        document.querySelector("#ul-room-list").innerHTML = "";
+        for (let roomId in roomUserCounts) {
+          const roomUserCount = roomUserCounts[roomId];
+          if (roomId === "waitRoom#") continue;
+
+          let room = loginUserList.filter((v) => v.roomId === roomId);
+          let li = document.createElement("li");
+          li.innerHTML = `<a href="${roomId}"><span id = "span-room-name">${room[0].roomName}</span>[${roomUserCount}]</a>`;
+          document.querySelector("#ul-room-list").appendChild(li);
+        }
+
+        // current room
+        setSelectedSideMenu(myInfo.roomId);
       }
 
       // room 유저수
@@ -319,14 +375,26 @@
           ulChatMsg.appendChild(item);
         }
       }
-      // side 선택된 메뉴 표시
+
+      // 현재 소속 room 표시
       function setSelectedSideMenu(path) {
-        // 선택된 메뉴 표시
         let tags = document.querySelectorAll("#ul-room-list li a");
         tags.forEach(function (tag) {
           tag.removeAttribute("class");
         });
         document.querySelector(`#ul-room-list li a[href="${path}"]`)?.setAttribute("class", "selected");
+      }
+
+      // 랜덤 문자열 6자리
+      function randomString() {
+        const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXTZabcdefghiklmnopqrstuvwxyz";
+        const stringLength = 6;
+        let randomstring = "";
+        for (let i = 0; i < stringLength; i++) {
+          const rnum = Math.floor(Math.random() * chars.length);
+          randomstring += chars.substring(rnum, rnum + 1);
+        }
+        return randomstring;
       }
     </script>
   </body>

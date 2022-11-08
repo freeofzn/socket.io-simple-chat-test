@@ -1,119 +1,152 @@
 module.exports = (nsp1) => {
   nsp1.on("connection", (socket) => {
-    console.log("connection nsp1");
-    socket.data.nickName = "guest#"; // 게스트 접속
-    socket.data.roomName = "waitRoom#"; // 대기실 접속
-    connectProcess(); // 최초 연결시, 로그인 유저목록 전송
     /**
-     * on join user
-     * @param tempLoginId : temp id
-     * @return
-     */
-    socket.on("join user", (tempLoginId) => {
-      joinUserProcess(tempLoginId);
-    });
-
-    socket.on("chat message", (msg) => {
-      //nsp1.emit("chat message", msg);
-      console.log("chat message", msg);
-      nsp1.to(msg.roomName).emit("chat message", { type: "chat msg", nickName: socket.data.nickName, msg: msg.chatMsg });
-    });
-
-    socket.on("join room", (msg) => {
-      console.log("join room", msg);
-      let leaveRoomName, joinRoomName;
-      if (socket.data.roomName !== undefined) {
-        console.log("이전방 나오기", socket.data.roomName);
-        leaveRoomName = socket.data.roomName;
-        socket.leave(leaveRoomName); // 이전 room 에서 나오기
-      }
-      joinRoomName = msg.roomName;
-      socket.join(joinRoomName);
-      socket.data.roomName = joinRoomName;
-      joinRoomProcess(leaveRoomName, joinRoomName);
-    });
-
-    /**
-     * 최초 비로그인 접속처리 - 현재 접속중인 유저목록 전송
+     * on connection
      * @param
      * @return
      */
-    async function connectProcess() {
-      const sockets = await nsp1.fetchSockets();
+    connectProcess();
 
-      // 로그인 유저목록
-      const loginUserList = [];
-      for (const _socket of sockets) {
-        loginUserList.push({ roomName: _socket.data.roomName, nickName: _socket.data.nickName });
-      }
-      nsp1.emit("connect user", { isLogin: false, allUserCount: nsp1.sockets.size, loginUserList });
+    async function connectProcess() {
+      socket.data.nickName = "guest#";
+      socket.data.roomId = "waitRoom#";
+      socket.data.roomName = "waitRoom#";
+
+      emitAllUserList();
     }
 
     /**
-     * 로그인 처리 : 아이디 중복체크 후 없으면 로그인 처리
-     * @param tempLoginId : 입력한 로그인 아이디
+     * on login
+     * @param tempLoginId : temp login id
      * @return
      */
-    async function joinUserProcess(tempLoginId) {
-      const sockets = await nsp1.fetchSockets();
+    socket.on("login", (tempLoginId) => {
+      loginProcess(tempLoginId);
+    });
 
-      // 닉네임 중복체크
+    async function loginProcess(tempLoginId) {
+      // check dup
+      const sockets = await nsp1.fetchSockets();
       for (const _socket of sockets) {
         if (tempLoginId === _socket.data.nickName) {
-          nsp1.emit("join user", { isLogin: false, errMsg: "DUP_LOGIN_ID", nickName: tempLoginId }); // 중복발생시
+          nsp1.emit("login", { isLogin: false, errMsg: "DUP_LOGIN_ID", nickName: tempLoginId });
           return;
         }
       }
 
-      // 중복없을때
+      // ok - no dup
       socket.data.nickName = tempLoginId;
 
-      // 로그인 유저목록
-      const loginUserList = [];
-      for (const _socket of sockets) {
-        loginUserList.push({ roomName: _socket.data.roomName, nickName: _socket.data.nickName });
-      }
-      nsp1.emit("join user", { isLogin: true, errMsg: "LOGIN_OK", nickName: socket.data.nickName, roomName: socket.data.roomName, allUserCount: nsp1.sockets.size, loginUserList }); // 중복없음
+      nsp1.emit("login", {
+        isLogin: true,
+        errMsg: "LOGIN_OK",
+        nickName: socket.data.nickName,
+        roomId: socket.data.roomId,
+        roomName: socket.data.roomName,
+      });
+
+      emitAllUserList();
     }
 
     /**
-     *
+     * on join room
      * @param
      * @return
      */
-    async function joinRoomProcess(leaveRoomName, joinRoomName) {
-      const loginUserSockets = await nsp1.fetchSockets();
-      const leaveRoomSockets = await nsp1.in(leaveRoomName).fetchSockets();
-      const joinRoomSockets = await nsp1.in(joinRoomName).fetchSockets();
-      const leaveRoomUserList = [];
-      const joinRoomuserList = [];
+    socket.on("join room", (msg) => {
+      let leaveRoomId, joinRoomId;
 
-      // 로그인 유저목록
-      const loginUserList = [];
-      for (const _socket of loginUserSockets) {
-        loginUserList.push({ roomName: _socket.data.roomName, nickName: _socket.data.nickName });
+      //1. leave before room
+
+      if (socket.data.roomId !== undefined) {
+        leaveRoomId = socket.data.roomId;
+        socket.leave(leaveRoomId);
       }
 
-      // emit leave room
-      for (const _socket of leaveRoomSockets) {
-        console.log("leaveRoomUserList", _socket.data);
-        leaveRoomUserList.push({ nickName: _socket.data.nickName });
-      }
-      if (leaveRoomName !== joinRoomName) {
-        nsp1.to(leaveRoomName).emit("chat message", { type: "leave room", nickName: socket.data.nickName, roomUserList: leaveRoomUserList, loginUserList });
-      }
+      // 2. join after room
 
-      // emit join room
-      for (const _socket of joinRoomSockets) {
-        console.log("joinRoomProcess", _socket.data);
-        joinRoomuserList.push({ nickName: _socket.data.nickName });
+      joinRoomId = msg.roomId;
+      joinRoomName = msg.roomName;
+      socket.join(joinRoomId);
+      socket.data.roomId = joinRoomId;
+      socket.data.roomName = joinRoomName;
+
+      joinRoomProcess(socket.data.nickName, leaveRoomId, joinRoomId);
+    });
+
+    async function joinRoomProcess(nickName, leaveRoomId, joinRoomId) {
+      if (leaveRoomId !== joinRoomId) {
+        emitLeaveRoomMsg(nickName, leaveRoomId);
       }
-      nsp1.to(joinRoomName).emit("chat message", { type: "join room", nickName: socket.data.nickName, roomUserList: joinRoomuserList, loginUserList });
+      emitJoinRoomMsg(nickName, joinRoomId);
+      emitAllUserList();
     }
 
-    socket.on("disconnect", () => {
-      socket.broadcast.emit("chat message", "disconnect");
-      console.log("user disconnected");
+    /**
+     * on chat
+     * @param
+     * @return
+     */
+    socket.on("chat message", (msg) => {
+      nsp1.to(msg.roomId).emit("chat message", { type: "chat msg", nickName: socket.data.nickName, msg: msg.chatMsg });
     });
+
+    /**
+     * on disconnect
+     * @param
+     * @return
+     */
+    socket.on("disconnect", () => {
+      let leaveRoomId = socket.data.roomId;
+      let nickName = socket.data.nickName;
+      disconnectProcess(leaveRoomId, nickName);
+    });
+
+    async function disconnectProcess(leaveRoomId, nickName) {
+      emitLeaveRoomMsg(nickName, leaveRoomId);
+      emitAllUserList();
+    }
+
+    /**
+     * emit all user list
+     * @param
+     * @return
+     */
+    async function emitAllUserList() {
+      const allUserList = [];
+      const allUserSockets = await nsp1.fetchSockets();
+      for (const _socket of allUserSockets) {
+        allUserList.push({ roomId: _socket.data.roomId, roomName: _socket.data.roomName, nickName: _socket.data.nickName });
+      }
+      nsp1.emit("all user list", { allUserList });
+    }
+
+    /**
+     * emit join room message
+     * @param
+     * @return
+     */
+    async function emitJoinRoomMsg(nickName, joinRoomId) {
+      const joinRoomSockets = await nsp1.in(joinRoomId).fetchSockets();
+      const joinRoomuserList = [];
+      for (const _socket of joinRoomSockets) {
+        joinRoomuserList.push({ nickName: _socket.data.nickName });
+      }
+      nsp1.to(joinRoomId).emit("chat message", { type: "join room", nickName, roomUserList: joinRoomuserList });
+    }
+
+    /**
+     * emit leave room message
+     * @param
+     * @return
+     */
+    async function emitLeaveRoomMsg(nickName, leaveRoomId) {
+      const leaveRoomSockets = await nsp1.in(leaveRoomId).fetchSockets();
+      const leaveRoomUserList = [];
+      for (const _socket of leaveRoomSockets) {
+        leaveRoomUserList.push({ nickName: _socket.data.nickName });
+      }
+      nsp1.to(leaveRoomId).emit("chat message", { type: "leave room", nickName, roomUserList: leaveRoomUserList });
+    }
   });
 };
